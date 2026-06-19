@@ -2,9 +2,11 @@ import type { Layer, Psd } from 'ag-psd';
 import type { ColorLayer, ImageArea } from '@/types/layer';
 
 /**
- * Rebuild a color layer's working canvas from its pristine snapshot, filled
- * with the current color. Safe to repeat on every recolor — the original pixels
- * live in `originalCanvas` and are never lost (survives StrictMode's double run).
+ * Rebuild a color layer's working canvas from its pristine snapshot. When a
+ * color has been picked, it's filled with that color (masked to the original
+ * shape); when no color is picked yet, the original pixels are restored as-is.
+ * Safe to repeat on every recolor — the original pixels live in
+ * `originalCanvas` and are never lost (survives StrictMode's double run).
  */
 function applyColorLayer(cl: ColorLayer) {
   const sourceCanvas = cl.psdLayer.canvas;
@@ -14,6 +16,18 @@ function applyColorLayer(cl: ColorLayer) {
   const width = sourceCanvas.width;
   const height = sourceCanvas.height;
 
+  const sourceCtx = sourceCanvas.getContext('2d');
+  if (!sourceCtx) return;
+
+  // Always rebuild from the pristine snapshot so this stays idempotent. When no
+  // color has been picked yet, restore the original pixels and stop there.
+  sourceCtx.clearRect(0, 0, width, height);
+  const color = cl.currentColor;
+  if (color === null) {
+    sourceCtx.drawImage(original, 0, 0);
+    return;
+  }
+
   // Composite the color on a temp canvas, masking against the pristine shape.
   const tempCanvas = document.createElement('canvas');
   tempCanvas.width = width;
@@ -22,15 +36,12 @@ function applyColorLayer(cl: ColorLayer) {
   if (!tempCtx) return;
 
   tempCtx.drawImage(original, 0, 0);
-  tempCtx.fillStyle = cl.currentColor;
+  tempCtx.fillStyle = color;
   tempCtx.fillRect(0, 0, width, height);
   tempCtx.globalCompositeOperation = 'source-in';
   tempCtx.fillRect(0, 0, width, height);
   tempCtx.globalCompositeOperation = 'source-over';
 
-  const sourceCtx = sourceCanvas.getContext('2d');
-  if (!sourceCtx) return;
-  sourceCtx.clearRect(0, 0, width, height);
   sourceCtx.drawImage(tempCanvas, 0, 0);
 }
 

@@ -55,7 +55,7 @@ export function extractEditableLayers(psd: Psd): {
         name: cleanLayerName(layer.name),
         psdLayer: layer,
         originalCanvas: layer.canvas ? snapshotCanvas(layer.canvas) : null,
-        currentColor: '#ffffff', // Default to white
+        currentColor: null, // Untouched — keep the original pixels until a color is picked
       });
     }
     if (

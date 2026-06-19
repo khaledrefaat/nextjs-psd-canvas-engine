@@ -21,12 +21,12 @@ export function ColorLayerControl({
         <input
           type="color"
           id={`color-${layer.id}`}
-          value={layer.currentColor}
+          value={layer.currentColor ?? '#ffffff'}
           onChange={(e) => onColorChange(layer.id, e.target.value)}
           className="h-12 w-12 rounded-lg border border-zinc-200 dark:border-zinc-700 cursor-pointer bg-transparent p-1"
         />
         <span className="text-sm text-zinc-500 dark:text-zinc-400 font-mono">
-          {layer.currentColor}
+          {layer.currentColor ?? 'Original'}
         </span>
       </div>
     </div>

@@ -38,7 +38,7 @@ export default function Editor() {
     const buffer = await file.arrayBuffer();
     // Skip the composite so layers stay separate.
     const parsedPsd = readPsd(buffer);
-    console.log(parsedPsd);
+
     const { colorLayers: nextColors, imageAreas: nextImages } =
       extractEditableLayers(parsedPsd);
 
@@ -79,12 +79,17 @@ export default function Editor() {
     if (!file) return;
 
     const img = new Image();
+    const url = URL.createObjectURL(file);
     img.onload = () => {
       setImageAreas((prev) =>
         prev.map((l) => (l.id === layerId ? { ...l, currentImage: img } : l)),
       );
+      // The image is now decoded into `img`, so the blob URL is safe to free.
+      URL.revokeObjectURL(url);
     };
-    img.src = URL.createObjectURL(file);
+    // Free the URL too if the image fails to decode, so it can't leak.
+    img.onerror = () => URL.revokeObjectURL(url);
+    img.src = url;
   };
 
   const layerNames = (psd?.children ?? [])
