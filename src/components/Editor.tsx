@@ -15,13 +15,20 @@ export default function Editor() {
   const [colorLayers, setColorLayers] = useState<ColorLayer[]>([]);
   const [imageAreas, setImageAreas] = useState<ImageArea[]>([]);
   const [psd, setPsd] = useState<Psd | null>(null);
+  const [hiddenLayers, setHiddenLayers] = useState<Set<string>>(new Set());
 
   // Whenever our layers change, re-render the canvas.
   useEffect(() => {
     if (psd && canvasRef.current) {
-      renderMockup(canvasRef.current, psd, colorLayers, imageAreas);
+      renderMockup(
+        canvasRef.current,
+        psd,
+        colorLayers,
+        imageAreas,
+        hiddenLayers,
+      );
     }
-  }, [psd, colorLayers, imageAreas]);
+  }, [psd, colorLayers, imageAreas, hiddenLayers]);
 
   // Load + parse a PSD file and split out the editable layers.
   const handleFileUpload = async (e: ChangeEvent<HTMLInputElement>) => {
@@ -31,12 +38,15 @@ export default function Editor() {
     const buffer = await file.arrayBuffer();
     // Skip the composite so layers stay separate.
     const parsedPsd = readPsd(buffer);
+    console.log(parsedPsd);
     const { colorLayers: nextColors, imageAreas: nextImages } =
       extractEditableLayers(parsedPsd);
 
     setPsd(parsedPsd);
     setColorLayers(nextColors);
     setImageAreas(nextImages);
+    // New file → fresh visibility, so stale hidden names don't carry over.
+    setHiddenLayers(new Set());
   };
 
   const handleColorChange = (layerId: string, newColor: string) => {
@@ -45,6 +55,20 @@ export default function Editor() {
         l.id === layerId ? { ...l, currentColor: newColor } : l,
       ),
     );
+  };
+
+  // Show/hide a top-level layer by name. Always return a new Set so React
+  // sees a changed reference and the render effect re-fires.
+  const handleToggleLayer = (layerName: string) => {
+    setHiddenLayers((prev) => {
+      const next = new Set(prev);
+      if (next.has(layerName)) {
+        next.delete(layerName);
+      } else {
+        next.add(layerName);
+      }
+      return next;
+    });
   };
 
   const handleImageUpload = (
@@ -62,6 +86,10 @@ export default function Editor() {
     };
     img.src = URL.createObjectURL(file);
   };
+
+  const layerNames = (psd?.children ?? [])
+    .map((child) => child.name ?? 'Layer')
+    .filter((name) => !name.includes('mm_'));
 
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-zinc-100 dark:bg-zinc-950">
@@ -85,8 +113,11 @@ export default function Editor() {
         {/* Sidebar — controls */}
         {psd ? (
           <Sidebar
+            layerNames={layerNames}
+            hiddenLayers={hiddenLayers}
             colorLayers={colorLayers}
             imageAreas={imageAreas}
+            onToggleLayer={handleToggleLayer}
             onColorChange={handleColorChange}
             onImageUpload={handleImageUpload}
           />

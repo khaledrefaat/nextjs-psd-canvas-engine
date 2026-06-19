@@ -15,6 +15,17 @@ export const LAYER_PREFIX = {
 } as const;
 
 /**
+ * Strip the editable-layer prefix (if any) from a layer name, for display.
+ * Layers with no prefix are returned unchanged.
+ */
+export function cleanLayerName(name: string): string {
+  return name
+    .replace(LAYER_PREFIX.color, '')
+    .replace(LAYER_PREFIX.imageWrap, '')
+    .replace(LAYER_PREFIX.image, '');
+}
+
+/**
  * Snapshot a layer's canvas once at parse time. The renderer recolors /
  * re-images against this pristine copy, so the original pixels are never lost.
  */
@@ -41,7 +52,7 @@ export function extractEditableLayers(psd: Psd): {
     if (layer.name?.startsWith(LAYER_PREFIX.color)) {
       colorLayers.push({
         id: layer.name,
-        name: layer.name.replace(LAYER_PREFIX.color, ''),
+        name: cleanLayerName(layer.name),
         psdLayer: layer,
         originalCanvas: layer.canvas ? snapshotCanvas(layer.canvas) : null,
         currentColor: '#ffffff', // Default to white
@@ -53,9 +64,7 @@ export function extractEditableLayers(psd: Psd): {
     ) {
       imageAreas.push({
         id: layer.name,
-        name: layer.name
-          .replace(LAYER_PREFIX.imageWrap, '')
-          .replace(LAYER_PREFIX.image, ''),
+        name: cleanLayerName(layer.name),
         psdLayer: layer,
         originalCanvas: layer.canvas ? snapshotCanvas(layer.canvas) : null,
         currentImage: null,

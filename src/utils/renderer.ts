@@ -114,6 +114,7 @@ export function renderMockup(
   psd: Psd,
   colorLayers: ColorLayer[],
   imageAreas: ImageArea[],
+  hiddenLayers: Set<string> = new Set(),
 ) {
   const ctx = canvas.getContext('2d');
   const children = psd.children;
@@ -129,8 +130,15 @@ export function renderMockup(
   imageAreas.forEach(applyImageArea);
 
   // 3. Composite every layer onto the main canvas (clipping masks included).
+  //    A layer whose name is in `hiddenLayers` is skipped entirely — it isn't
+  //    drawn and doesn't become a clip target, matching how layers without a
+  //    canvas already behave. NOTE: this does not cascade to a hidden layer's
+  //    clipped children; they keep masking against the prior clip target. That's
+  //    fine for the common case (shadows/backgrounds are normal, non-clipped
+  //    layers) and keeps the clipping invariant in drawLayer untouched.
   let clipTarget: Layer | null = null;
   for (const layer of children) {
+    if (layer.name && hiddenLayers.has(layer.name)) continue;
     clipTarget = drawLayer(ctx, layer, clipTarget);
   }
 }
