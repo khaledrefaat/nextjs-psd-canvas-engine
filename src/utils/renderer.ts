@@ -128,14 +128,18 @@ const PERSPECTIVE_SUBDIVISIONS = 20;
 /**
  * Draw `image` into a destination quad (`tl`, `tr`, `br`, `bl`, in the context's
  * own coordinate space), reproducing the smart object's perspective. The image
- * is first fit (aspect preserved, centered) into the source rectangle
- * (`srcW`×`srcH`, offset by `offX`/`offY`), then projectively mapped.
+ * is placed into the source rectangle (`srcW`×`srcH`) at
+ * `[offX, offY, fitW, fitH]` — a fill (fitW/fitH ≥ src) covers the whole quad
+ * and crops the overflow; a fit (≤ src) centers and letterboxes — then mapped.
  *
- * Canvas 2D has no native perspective transform, so we subdivide the source
- * rectangle into an N×N grid, map each cell's corners through the homography,
- * and draw each cell with its own affine transform clipped to its quad. At
- * N≈20 each cell is small enough that the piecewise-affine result is visually
- * indistinguishable from the true projective mapping.
+ * Canvas 2D has no native perspective transform, so we subdivide the SOURCE
+ * RECTANGLE into an N×N grid (not the image rect), map each cell's corners
+ * through the homography, and draw each cell with its own affine transform
+ * clipped to its quad. Subdividing the source rectangle is what keeps a fill
+ * from spilling past the quad: every cell projects inside it, so the overflow
+ * is cropped to the smart-object bounds exactly. At N≈20 each cell is small
+ * enough that the piecewise-affine result is visually indistinguishable from
+ * the true projective mapping.
  */
 function drawImageInQuad(
   ctx: CanvasRenderingContext2D,
@@ -158,33 +162,39 @@ function drawImageInQuad(
   const imgW = image.width;
   const imgH = image.height;
 
+  // kx/ky convert source-rect units → image pixels (the image sits inside the
+  // source rect at [offX, offY, fitW, fitH]).
+  const kx = imgW / fitW;
+  const ky = imgH / fitH;
+  const cellSrcW = srcW / N;
+  const cellSrcH = srcH / N;
+  const cellImgW = cellSrcW * kx;
+  const cellImgH = cellSrcH * ky;
+
   for (let j = 0; j < N; j++) {
     for (let i = 0; i < N; i++) {
-      // Corners of this cell in source-rectangle space.
-      const sx0 = offX + (i / N) * fitW;
-      const sy0 = offY + (j / N) * fitH;
-      const sx1 = offX + ((i + 1) / N) * fitW;
-      const sy1 = offY + ((j + 1) / N) * fitH;
-      // The same cell projected into the destination quad.
+      // Corners of this cell in source-rectangle space, and their projection.
+      const sx0 = i * cellSrcW;
+      const sx1 = sx0 + cellSrcW;
+      const sy0 = j * cellSrcH;
+      const sy1 = sy0 + cellSrcH;
       const d00 = mapThroughHomography(H, sx0, sy0);
       const d10 = mapThroughHomography(H, sx1, sy0);
       const d11 = mapThroughHomography(H, sx1, sy1);
       const d01 = mapThroughHomography(H, sx0, sy1);
 
-      // The matching region of the source image, in image pixels.
-      const ux0 = (i / N) * imgW;
-      const uy0 = (j / N) * imgH;
-      const cellW = imgW / N;
-      const cellH = imgH / N;
+      // Top-left of this cell in image-pixel space.
+      const ux0 = (sx0 - offX) * kx;
+      const uy0 = (sy0 - offY) * ky;
 
-      // Affine map image-px → context-px for this cell. Treat the projected cell
-      // as a parallelogram anchored at d00 with axes (d10−d00) and (d01−d00):
-      //   ctx = d00 + ((px − ux0)/cellW)·(d10−d00) + ((py − uy0)/cellH)·(d01−d00)
+      // Affine map image-px → context-px. Treat the projected cell as a
+      // parallelogram anchored at d00 with axes (d10−d00) and (d01−d00):
+      //   ctx = d00 + ((px − ux0)/cellImgW)·(d10−d00) + ((py − uy0)/cellImgH)·(d01−d00)
       // setTransform(a, b, c, d, e, f): x' = a·x + c·y + e, y' = b·x + d·y + f.
-      const a = (d10.x - d00.x) / cellW;
-      const b = (d10.y - d00.y) / cellW;
-      const c = (d01.x - d00.x) / cellH;
-      const d = (d01.y - d00.y) / cellH;
+      const a = (d10.x - d00.x) / cellImgW;
+      const b = (d10.y - d00.y) / cellImgW;
+      const c = (d01.x - d00.x) / cellImgH;
+      const d = (d01.y - d00.y) / cellImgH;
       const e = d00.x - ux0 * a - uy0 * c;
       const f = d00.y - ux0 * b - uy0 * d;
 
@@ -244,9 +254,9 @@ function applyImageArea(ia: ImageArea) {
       const srcW = placed.width ?? Math.hypot(tr.x - tl.x, tr.y - tl.y);
       const srcH = placed.height ?? Math.hypot(bl.x - tl.x, bl.y - tl.y);
       if (srcW > 0 && srcH > 0) {
-        // Fit the image (preserve aspect, center) inside the source rectangle,
-        // then projectively map it into the quad.
-        const ratio = Math.min(
+        // Fill (cover) the source rectangle — aspect preserved, centered, with
+        // the overflowing edges cropped to the quad by drawImageInQuad.
+        const ratio = Math.max(
           srcW / ia.currentImage.width,
           srcH / ia.currentImage.height,
         );
@@ -272,8 +282,8 @@ function applyImageArea(ia: ImageArea) {
       }
     }
 
-    // No usable smart-object transform (e.g. a plain tagged layer) → plain fit.
-    const ratio = Math.min(
+    // No usable smart-object transform (e.g. a plain tagged layer) → plain fill.
+    const ratio = Math.max(
       layerCanvas.width / ia.currentImage.width,
       layerCanvas.height / ia.currentImage.height,
     );
