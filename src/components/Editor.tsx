@@ -19,6 +19,8 @@ export default function Editor() {
   const [hiddenLayers, setHiddenLayers] = useState<Set<string>>(new Set());
   // id of the image area whose transform dialog is open (null = closed).
   const [transformLayerId, setTransformLayerId] = useState<string | null>(null);
+  // Mobile sidebar drawer open state (ignored on desktop, where it's inline).
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // Whenever our layers change, re-render the canvas.
   useEffect(() => {
@@ -135,8 +137,18 @@ export default function Editor() {
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-zinc-100 dark:bg-zinc-950">
       {/* Header */}
-      <header className="flex items-center gap-4 px-6 py-4 border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shrink-0">
-        <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">
+      <header className="flex items-center gap-2 sm:gap-4 px-4 sm:px-6 py-3 sm:py-4 border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shrink-0">
+        {psd ? (
+          <button
+            type="button"
+            aria-label="Show adjustments"
+            onClick={() => setSidebarOpen(true)}
+            className="inline-flex shrink-0 items-center justify-center rounded-lg p-2 text-zinc-700 hover:bg-zinc-100 md:hidden dark:text-zinc-300 dark:hover:bg-zinc-800"
+          >
+            <Icon name="menu" className="h-5 w-5" />
+          </button>
+        ) : null}
+        <h1 className="hidden sm:block text-xl font-semibold text-zinc-900 dark:text-zinc-100">
           PSD Mockup Editor
         </h1>
         <UploadButton
@@ -151,17 +163,17 @@ export default function Editor() {
           <button
             type="button"
             onClick={handleDownload}
-            className="inline-flex items-center gap-2 rounded-lg border border-zinc-300 px-5 py-2.5 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-zinc-300 px-4 py-2.5 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-50 sm:px-5 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
           >
             <Icon name="download" className="h-5 w-5" />
-            Download
+            <span className="hidden sm:inline">Download</span>
           </button>
         ) : null}
       </header>
 
       {/* Main area: sidebar + canvas */}
       <div className="flex flex-1 min-h-0">
-        {/* Sidebar — controls */}
+        {/* Sidebar — controls (inline on desktop, slide-in drawer on mobile) */}
         {psd ? (
           <Sidebar
             layerNames={layerNames}
@@ -171,12 +183,26 @@ export default function Editor() {
             onToggleLayer={handleToggleLayer}
             onColorChange={handleColorChange}
             onImageUpload={handleImageUpload}
-            onOpenTransform={(id) => setTransformLayerId(id)}
+            onOpenTransform={(id) => {
+              setTransformLayerId(id);
+              setSidebarOpen(false);
+            }}
+            open={sidebarOpen}
+            onClose={() => setSidebarOpen(false)}
+          />
+        ) : null}
+
+        {/* Backdrop behind the mobile drawer. */}
+        {sidebarOpen && psd ? (
+          <div
+            onClick={() => setSidebarOpen(false)}
+            aria-hidden="true"
+            className="fixed inset-0 z-30 bg-black/40 md:hidden"
           />
         ) : null}
 
         {/* Canvas area */}
-        <main className="flex-1 flex items-center justify-center p-8 overflow-auto">
+        <main className="flex-1 flex items-center justify-center p-4 overflow-auto md:p-8">
           {!psd ? (
             <div className="flex flex-col items-center gap-4 text-zinc-400 dark:text-zinc-600">
               <Icon name="image" className="h-24 w-24" strokeWidth={1} />

@@ -108,7 +108,7 @@ export function ImageTransformDialog({
         role="dialog"
         aria-modal="true"
         aria-label={`Adjust ${imageArea.name}`}
-        className="relative w-full max-w-3xl rounded-2xl bg-white p-6 shadow-2xl dark:bg-zinc-900"
+        className="relative w-full max-w-3xl rounded-2xl bg-white p-4 shadow-2xl sm:p-6 dark:bg-zinc-900"
       >
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
@@ -137,7 +137,7 @@ export function ImageTransformDialog({
             Drag the image to move it — the box is the crop boundary.
           </p>
 
-          <div className="mt-1 flex w-full items-center gap-4">
+          <div className="mt-1 flex w-full flex-wrap items-center gap-3 sm:gap-4">
             <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
               Zoom
             </span>
@@ -150,7 +150,7 @@ export function ImageTransformDialog({
               onChange={(e) =>
                 onChange({ ...transform, scale: Number(e.target.value) })
               }
-              className="flex-1 accent-zinc-900 dark:accent-zinc-100"
+              className="min-w-32 flex-1 accent-zinc-900 dark:accent-zinc-100"
             />
             <span className="w-12 text-right text-sm tabular-nums text-zinc-500 dark:text-zinc-400">
               {Math.round(transform.scale * 100)}%
