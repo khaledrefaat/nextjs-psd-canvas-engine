@@ -45,9 +45,173 @@ function applyColorLayer(cl: ColorLayer) {
   sourceCtx.drawImage(tempCanvas, 0, 0);
 }
 
+interface Point {
+  x: number;
+  y: number;
+}
+
+/**
+ * Solve the linear system M·x = b (n×n) via Gaussian elimination with partial
+ * pivoting. Returns null if the system is singular. Mutates M and b in place.
+ */
+function solveLinearSystem(M: number[][], b: number[]): number[] | null {
+  const n = b.length;
+  for (let col = 0; col < n; col++) {
+    let pivot = col;
+    for (let row = col + 1; row < n; row++) {
+      if (Math.abs(M[row][col]) > Math.abs(M[pivot][col])) pivot = row;
+    }
+    if (Math.abs(M[pivot][col]) < 1e-12) return null;
+    if (pivot !== col) {
+      [M[col], M[pivot]] = [M[pivot], M[col]];
+      [b[col], b[pivot]] = [b[pivot], b[col]];
+    }
+    for (let row = 0; row < n; row++) {
+      if (row === col) continue;
+      const factor = M[row][col] / M[col][col];
+      for (let k = col; k < n; k++) M[row][k] -= factor * M[col][k];
+      b[row] -= factor * b[col];
+    }
+  }
+  return b.map((value, i) => value / M[i][i]);
+}
+
+/**
+ * Homography mapping the source rectangle (0,0)→(w,h) onto a destination quad
+ * (top-left, top-right, bottom-right, bottom-left). Returns the 8 coefficients
+ * [a,b,c,d,e,f,g,h] where a source point (x,y) lands at
+ *   ((a·x + b·y + c) / (g·x + h·y + 1), (d·x + e·y + f) / (g·x + h·y + 1)).
+ * This is the projective transform Photoshop records for a perspective-placed
+ * smart object — a single affine can't represent it (the 4 corners aren't a
+ * parallelogram), so we need the full homography.
+ */
+function computeHomography(
+  w: number,
+  h: number,
+  tl: Point,
+  tr: Point,
+  br: Point,
+  bl: Point,
+): number[] | null {
+  const src = [
+    { x: 0, y: 0 },
+    { x: w, y: 0 },
+    { x: w, y: h },
+    { x: 0, y: h },
+  ];
+  const dst = [tl, tr, br, bl];
+  const M: number[][] = [];
+  const b: number[] = [];
+  for (let i = 0; i < 4; i++) {
+    const { x, y } = src[i];
+    const { x: u, y: v } = dst[i];
+    M.push([x, y, 1, 0, 0, 0, -x * u, -y * u]);
+    b.push(u);
+    M.push([0, 0, 0, x, y, 1, -x * v, -y * v]);
+    b.push(v);
+  }
+  return solveLinearSystem(M, b);
+}
+
+/** Apply a homography (from `computeHomography`) to a single point. */
+function mapThroughHomography(H: number[], x: number, y: number): Point {
+  const denom = H[6] * x + H[7] * y + 1;
+  return {
+    x: (H[0] * x + H[1] * y + H[2]) / denom,
+    y: (H[3] * x + H[4] * y + H[5]) / denom,
+  };
+}
+
+/** Grid resolution used to approximate a perspective quad with affine cells. */
+const PERSPECTIVE_SUBDIVISIONS = 20;
+
+/**
+ * Draw `image` into a destination quad (`tl`, `tr`, `br`, `bl`, in the context's
+ * own coordinate space), reproducing the smart object's perspective. The image
+ * is first fit (aspect preserved, centered) into the source rectangle
+ * (`srcW`×`srcH`, offset by `offX`/`offY`), then projectively mapped.
+ *
+ * Canvas 2D has no native perspective transform, so we subdivide the source
+ * rectangle into an N×N grid, map each cell's corners through the homography,
+ * and draw each cell with its own affine transform clipped to its quad. At
+ * N≈20 each cell is small enough that the piecewise-affine result is visually
+ * indistinguishable from the true projective mapping.
+ */
+function drawImageInQuad(
+  ctx: CanvasRenderingContext2D,
+  image: HTMLImageElement,
+  srcW: number,
+  srcH: number,
+  offX: number,
+  offY: number,
+  fitW: number,
+  fitH: number,
+  tl: Point,
+  tr: Point,
+  br: Point,
+  bl: Point,
+) {
+  const H = computeHomography(srcW, srcH, tl, tr, br, bl);
+  if (!H) return;
+
+  const N = PERSPECTIVE_SUBDIVISIONS;
+  const imgW = image.width;
+  const imgH = image.height;
+
+  for (let j = 0; j < N; j++) {
+    for (let i = 0; i < N; i++) {
+      // Corners of this cell in source-rectangle space.
+      const sx0 = offX + (i / N) * fitW;
+      const sy0 = offY + (j / N) * fitH;
+      const sx1 = offX + ((i + 1) / N) * fitW;
+      const sy1 = offY + ((j + 1) / N) * fitH;
+      // The same cell projected into the destination quad.
+      const d00 = mapThroughHomography(H, sx0, sy0);
+      const d10 = mapThroughHomography(H, sx1, sy0);
+      const d11 = mapThroughHomography(H, sx1, sy1);
+      const d01 = mapThroughHomography(H, sx0, sy1);
+
+      // The matching region of the source image, in image pixels.
+      const ux0 = (i / N) * imgW;
+      const uy0 = (j / N) * imgH;
+      const cellW = imgW / N;
+      const cellH = imgH / N;
+
+      // Affine map image-px → context-px for this cell. Treat the projected cell
+      // as a parallelogram anchored at d00 with axes (d10−d00) and (d01−d00):
+      //   ctx = d00 + ((px − ux0)/cellW)·(d10−d00) + ((py − uy0)/cellH)·(d01−d00)
+      // setTransform(a, b, c, d, e, f): x' = a·x + c·y + e, y' = b·x + d·y + f.
+      const a = (d10.x - d00.x) / cellW;
+      const b = (d10.y - d00.y) / cellW;
+      const c = (d01.x - d00.x) / cellH;
+      const d = (d01.y - d00.y) / cellH;
+      const e = d00.x - ux0 * a - uy0 * c;
+      const f = d00.y - ux0 * b - uy0 * d;
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(d00.x, d00.y);
+      ctx.lineTo(d10.x, d10.y);
+      ctx.lineTo(d11.x, d11.y);
+      ctx.lineTo(d01.x, d01.y);
+      ctx.closePath();
+      ctx.clip();
+      ctx.setTransform(a, b, c, d, e, f);
+      ctx.drawImage(image, 0, 0);
+      ctx.restore();
+    }
+  }
+}
+
 /**
  * Rebuild an image area's working canvas: the user's image (fit + centered) if
  * one has been uploaded, otherwise the original placeholder from the snapshot.
+ *
+ * The placeholder was placed at the designer's angle, baked into the rasterized
+ * layer canvas — so to keep a replacement aligned we map it through the same
+ * transform the smart object recorded. We prefer `nonAffineTransform` (the real
+ * perspective corners) over `transform` (the axis-aligned fallback Photoshop
+ * also keeps), since only the former carries the angle.
  */
 function applyImageArea(ia: ImageArea) {
   const layerCanvas = ia.psdLayer.canvas;
@@ -59,6 +223,56 @@ function applyImageArea(ia: ImageArea) {
   layerCtx.clearRect(0, 0, layerCanvas.width, layerCanvas.height);
 
   if (ia.currentImage) {
+    const placed = ia.psdLayer.placedLayer;
+    const docCorners = placed?.nonAffineTransform ?? placed?.transform;
+    if (placed && docCorners && docCorners.length >= 8) {
+      const left = ia.psdLayer.left ?? 0;
+      const top = ia.psdLayer.top ?? 0;
+      // Corners are in document space; offset into the layer canvas's local
+      // coords, since the canvas already sits at (left, top).
+      const local = (i: number): Point => ({
+        x: docCorners[i] - left,
+        y: docCorners[i + 1] - top,
+      });
+      const tl = local(0);
+      const tr = local(2);
+      const br = local(4);
+      const bl = local(6);
+
+      // Source rectangle = the smart object's own content size. Fall back to the
+      // quad's edge lengths when Photoshop didn't record it.
+      const srcW = placed.width ?? Math.hypot(tr.x - tl.x, tr.y - tl.y);
+      const srcH = placed.height ?? Math.hypot(bl.x - tl.x, bl.y - tl.y);
+      if (srcW > 0 && srcH > 0) {
+        // Fit the image (preserve aspect, center) inside the source rectangle,
+        // then projectively map it into the quad.
+        const ratio = Math.min(
+          srcW / ia.currentImage.width,
+          srcH / ia.currentImage.height,
+        );
+        const fitW = ia.currentImage.width * ratio;
+        const fitH = ia.currentImage.height * ratio;
+        const offX = (srcW - fitW) / 2;
+        const offY = (srcH - fitH) / 2;
+        drawImageInQuad(
+          layerCtx,
+          ia.currentImage,
+          srcW,
+          srcH,
+          offX,
+          offY,
+          fitW,
+          fitH,
+          tl,
+          tr,
+          br,
+          bl,
+        );
+        return;
+      }
+    }
+
+    // No usable smart-object transform (e.g. a plain tagged layer) → plain fit.
     const ratio = Math.min(
       layerCanvas.width / ia.currentImage.width,
       layerCanvas.height / ia.currentImage.height,

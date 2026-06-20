@@ -62,6 +62,25 @@ export function extractEditableLayers(psd: Psd): {
       layer.name?.startsWith(LAYER_PREFIX.imageWrap) ||
       layer.name?.startsWith(LAYER_PREFIX.image)
     ) {
+      // TEMP DEBUG: dump what the smart object exposes so we can see why the
+      // placement angle isn't applying. Remove once the angle is correct.
+      const placed = layer.placedLayer;
+      console.warn('[image-area debug]', layer.name, {
+        bounds: {
+          left: layer.left,
+          top: layer.top,
+          right: layer.right,
+          bottom: layer.bottom,
+        },
+        canvasSize: layer.canvas
+          ? { w: layer.canvas.width, h: layer.canvas.height }
+          : null,
+        hasPlacedLayer: !!placed,
+        transformLength: placed?.transform?.length,
+        transform: placed?.transform,
+        nonAffineTransform: placed?.nonAffineTransform,
+        sourceSize: placed ? { w: placed.width, h: placed.height } : null,
+      });
       imageAreas.push({
         id: layer.name,
         name: cleanLayerName(layer.name),
