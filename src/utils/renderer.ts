@@ -214,14 +214,126 @@ function drawImageInQuad(
 }
 
 /**
- * Rebuild an image area's working canvas: the user's image (fit + centered) if
- * one has been uploaded, otherwise the original placeholder from the snapshot.
- *
- * The placeholder was placed at the designer's angle, baked into the rasterized
- * layer canvas — so to keep a replacement aligned we map it through the same
- * transform the smart object recorded. We prefer `nonAffineTransform` (the real
- * perspective corners) over `transform` (the axis-aligned fallback Photoshop
- * also keeps), since only the former carries the angle.
+ * The smart object's placement as a destination quad plus the source rectangle
+ * that maps onto it, all in the layer canvas's local coordinate space. Returns
+ * null when the layer has no usable smart-object transform (e.g. a plain tagged
+ * raster layer). Used internally by `getImagePlacement` / `drawImageArea`.
+ */
+export function getImageAreaQuad(ia: ImageArea): {
+  tl: Point;
+  tr: Point;
+  br: Point;
+  bl: Point;
+  srcW: number;
+  srcH: number;
+} | null {
+  const placed = ia.psdLayer.placedLayer;
+  const docCorners = placed?.nonAffineTransform ?? placed?.transform;
+  if (!placed || !docCorners || docCorners.length < 8) return null;
+
+  const left = ia.psdLayer.left ?? 0;
+  const top = ia.psdLayer.top ?? 0;
+  const local = (i: number): Point => ({
+    x: docCorners[i] - left,
+    y: docCorners[i + 1] - top,
+  });
+  const tl = local(0);
+  const tr = local(2);
+  const br = local(4);
+  const bl = local(6);
+  // Source rectangle = the smart object's own content size. Fall back to the
+  // quad's edge lengths when Photoshop didn't record it.
+  const srcW = placed.width ?? Math.hypot(tr.x - tl.x, tr.y - tl.y);
+  const srcH = placed.height ?? Math.hypot(bl.x - tl.x, bl.y - tl.y);
+  return { tl, tr, br, bl, srcW, srcH };
+}
+
+/**
+ * Where the image sits inside its (un-projected) source box, after applying the
+ * user's scale/pan. The box is the smart object's source rectangle, or — for a
+ * layer with no perspective — the layer canvas itself. This flat, axis-aligned
+ * space is what the transform dialog edits in; `drawImageArea` then projects it
+ * through the quad for the real render. Because the quad is just this box after
+ * projection, cropping at the box edges here is identical to cropping at the
+ * quad edges on the canvas.
+ */
+export function getImagePlacement(ia: ImageArea): {
+  boxW: number;
+  boxH: number;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+} | null {
+  if (!ia.currentImage) return null;
+  const img = ia.currentImage;
+  const { scale, offsetX, offsetY } = ia.transform;
+
+  const quad = getImageAreaQuad(ia);
+  const boxW = quad?.srcW ?? ia.psdLayer.canvas?.width ?? 0;
+  const boxH = quad?.srcH ?? ia.psdLayer.canvas?.height ?? 0;
+  if (boxW <= 0 || boxH <= 0) return null;
+
+  // Cover the box, then apply the user's zoom (scale) and pan (offsetX/Y).
+  const ratio = Math.max(boxW / img.width, boxH / img.height);
+  const w = img.width * ratio * scale;
+  const h = img.height * ratio * scale;
+  const x = boxW / 2 + offsetX - w / 2;
+  const y = boxH / 2 + offsetY - h / 2;
+  return { boxW, boxH, x, y, w, h };
+}
+
+/**
+ * Draw an image area's current image (or its original placeholder) into `ctx`,
+ * in the layer canvas's local coordinate space, applying the user's scale/pan
+ * transform on top of the smart object's recorded perspective placement. Does
+ * NOT clear or resize the target — the caller owns that. Used by the main render
+ * (via applyImageArea); the transform dialog edits the flat placement instead.
+ */
+export function drawImageArea(ctx: CanvasRenderingContext2D, ia: ImageArea) {
+  if (!ia.currentImage) {
+    if (ia.originalCanvas) ctx.drawImage(ia.originalCanvas, 0, 0);
+    return;
+  }
+
+  const placement = getImagePlacement(ia);
+  if (!placement) return;
+
+  const quad = getImageAreaQuad(ia);
+  if (quad) {
+    // Project the flat source-space placement through the perspective quad.
+    drawImageInQuad(
+      ctx,
+      ia.currentImage,
+      placement.boxW,
+      placement.boxH,
+      placement.x,
+      placement.y,
+      placement.w,
+      placement.h,
+      quad.tl,
+      quad.tr,
+      quad.br,
+      quad.bl,
+    );
+    return;
+  }
+
+  // No usable smart-object transform (e.g. a plain tagged layer) → draw flat.
+  ctx.drawImage(
+    ia.currentImage,
+    placement.x,
+    placement.y,
+    placement.w,
+    placement.h,
+  );
+}
+
+/**
+ * Rebuild an image area's working canvas (the scratch buffer the renderer later
+ * composites). Clears it, then delegates to `drawImageArea`. (The transform
+ * dialog edits the flat placement via `getImagePlacement` instead, but both read
+ * the same `transform`, so the render and the dialog can't drift.)
  */
 function applyImageArea(ia: ImageArea) {
   const layerCanvas = ia.psdLayer.canvas;
@@ -231,71 +343,7 @@ function applyImageArea(ia: ImageArea) {
   if (!layerCtx) return;
 
   layerCtx.clearRect(0, 0, layerCanvas.width, layerCanvas.height);
-
-  if (ia.currentImage) {
-    const placed = ia.psdLayer.placedLayer;
-    const docCorners = placed?.nonAffineTransform ?? placed?.transform;
-    if (placed && docCorners && docCorners.length >= 8) {
-      const left = ia.psdLayer.left ?? 0;
-      const top = ia.psdLayer.top ?? 0;
-      // Corners are in document space; offset into the layer canvas's local
-      // coords, since the canvas already sits at (left, top).
-      const local = (i: number): Point => ({
-        x: docCorners[i] - left,
-        y: docCorners[i + 1] - top,
-      });
-      const tl = local(0);
-      const tr = local(2);
-      const br = local(4);
-      const bl = local(6);
-
-      // Source rectangle = the smart object's own content size. Fall back to the
-      // quad's edge lengths when Photoshop didn't record it.
-      const srcW = placed.width ?? Math.hypot(tr.x - tl.x, tr.y - tl.y);
-      const srcH = placed.height ?? Math.hypot(bl.x - tl.x, bl.y - tl.y);
-      if (srcW > 0 && srcH > 0) {
-        // Fill (cover) the source rectangle — aspect preserved, centered, with
-        // the overflowing edges cropped to the quad by drawImageInQuad.
-        const ratio = Math.max(
-          srcW / ia.currentImage.width,
-          srcH / ia.currentImage.height,
-        );
-        const fitW = ia.currentImage.width * ratio;
-        const fitH = ia.currentImage.height * ratio;
-        const offX = (srcW - fitW) / 2;
-        const offY = (srcH - fitH) / 2;
-        drawImageInQuad(
-          layerCtx,
-          ia.currentImage,
-          srcW,
-          srcH,
-          offX,
-          offY,
-          fitW,
-          fitH,
-          tl,
-          tr,
-          br,
-          bl,
-        );
-        return;
-      }
-    }
-
-    // No usable smart-object transform (e.g. a plain tagged layer) → plain fill.
-    const ratio = Math.max(
-      layerCanvas.width / ia.currentImage.width,
-      layerCanvas.height / ia.currentImage.height,
-    );
-    const width = ia.currentImage.width * ratio;
-    const height = ia.currentImage.height * ratio;
-    const x = (layerCanvas.width - width) / 2;
-    const y = (layerCanvas.height - height) / 2;
-
-    layerCtx.drawImage(ia.currentImage, x, y, width, height);
-  } else if (ia.originalCanvas) {
-    layerCtx.drawImage(ia.originalCanvas, 0, 0);
-  }
+  drawImageArea(layerCtx, ia);
 }
 
 /**

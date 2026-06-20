@@ -14,6 +14,7 @@ interface SidebarProps {
   onToggleLayer: (layerName: string) => void;
   onColorChange: (layerId: string, newColor: string) => void;
   onImageUpload: (layerId: string, e: ChangeEvent<HTMLInputElement>) => void;
+  onOpenTransform: (layerId: string) => void;
 }
 
 export function Sidebar({
@@ -24,6 +25,7 @@ export function Sidebar({
   onToggleLayer,
   onColorChange,
   onImageUpload,
+  onOpenTransform,
 }: SidebarProps) {
   return (
     <aside className="w-80 shrink-0 overflow-y-auto border-r border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 space-y-8">
@@ -59,6 +61,7 @@ export function Sidebar({
               key={layer.id}
               layer={layer}
               onImageUpload={onImageUpload}
+              onOpenTransform={onOpenTransform}
             />
           ))}
         </PanelSection>

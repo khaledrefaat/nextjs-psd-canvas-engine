@@ -1,20 +1,23 @@
 'use client';
 
 import { type PointerEvent, useEffect, useRef } from 'react';
-import type { ImageArea } from '@/types/layer';
-import { drawImageWithTransform } from '@/utils/renderer';
+import type { ImageArea, ImageTransform } from '@/types/layer';
+import { getImagePlacement } from '@/utils/renderer';
 
 interface ImageTransformDialogProps {
   imageArea: ImageArea;
-  onChange: (transform: ImageArea['transform']) => void;
+  onChange: (transform: ImageTransform) => void;
   onClose: () => void;
 }
 
 /**
- * Modal for positioning an uploaded image inside its smart-object area. The
- * dialog canvas's internal resolution equals the layer canvas (the smart-object
- * area), so the preview uses the exact same draw math as the main render — and
- * the box edge is the clip boundary. Every change is applied live.
+ * Modal for resizing / repositioning a placed image. The preview shows the image
+ * in its flat, un-projected source box — a normal rectangle you edit in, the way
+ * you'd edit a smart object's source — NOT the perspective-warped view. The box
+ * edge is the crop boundary: anything dragged outside it is clipped, exactly as
+ * it is on the real canvas (the perspective quad is just this box after
+ * projection, so cropping here is identical to cropping there). Drag to pan;
+ * slider to zoom.
  */
 export function ImageTransformDialog({
   imageArea,
@@ -22,22 +25,28 @@ export function ImageTransformDialog({
   onClose,
 }: ImageTransformDialogProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const layerCanvas = imageArea.psdLayer.canvas;
-  // Internal resolution = the smart-object area; CSS scales it down to fit. This
-  // keeps the preview math identical to the main render.
-  const areaW = layerCanvas?.width ?? 1;
-  const areaH = layerCanvas?.height ?? 1;
   const { transform, currentImage } = imageArea;
 
-  // Repaint the preview whenever the image or transform changes.
+  // The flat editing box (smart object source rectangle, or the layer canvas).
+  const placement = currentImage ? getImagePlacement(imageArea) : null;
+  const boxW = placement?.boxW ?? 1;
+  const boxH = placement?.boxH ?? 1;
+
+  // Repaint the flat preview whenever the image or transform changes. The canvas
+  // is sized to the box, so the browser clips the image to the box edge for us.
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas || !currentImage) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    ctx.clearRect(0, 0, areaW, areaH);
-    drawImageWithTransform(ctx, currentImage, areaW, areaH, transform);
-  }, [areaW, areaH, currentImage, transform]);
+    const ctx = canvas?.getContext('2d');
+    if (!canvas || !ctx || !currentImage || !placement) return;
+    ctx.clearRect(0, 0, boxW, boxH);
+    ctx.drawImage(
+      currentImage,
+      placement.x,
+      placement.y,
+      placement.w,
+      placement.h,
+    );
+  }, [boxW, boxH, currentImage, placement]);
 
   // Close on Escape.
   useEffect(() => {
@@ -48,7 +57,9 @@ export function ImageTransformDialog({
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  // Drag the image to pan. Convert screen px → area px via the displayed scale.
+  // Drag the image to pan. Store the gesture origin + the offset at press time,
+  // then accumulate from there to avoid drift. 1:1 in box pixels — no projection
+  // to undo, since the preview is the flat box.
   const drag = useRef<{
     startX: number;
     startY: number;
@@ -71,12 +82,12 @@ export function ImageTransformDialog({
   const onPointerMove = (e: PointerEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
     const start = drag.current;
-    if (!canvas || !start) return;
-    const scale = areaW / canvas.clientWidth;
+    if (!canvas || !start || canvas.clientWidth === 0) return;
+    const displayScale = boxW / canvas.clientWidth; // displayed px → box px
     onChange({
       ...transform,
-      offsetX: start.offX + (e.clientX - start.startX) * scale,
-      offsetY: start.offY + (e.clientY - start.startY) * scale,
+      offsetX: start.offX + (e.clientX - start.startX) * displayScale,
+      offsetY: start.offY + (e.clientY - start.startY) * displayScale,
     });
   };
 
@@ -96,12 +107,12 @@ export function ImageTransformDialog({
       <div
         role="dialog"
         aria-modal="true"
-        aria-label={`Position ${imageArea.name}`}
+        aria-label={`Adjust ${imageArea.name}`}
         className="relative w-full max-w-3xl rounded-2xl bg-white p-6 shadow-2xl dark:bg-zinc-900"
       >
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
-            Position &ldquo;{imageArea.name}&rdquo;
+            Adjust &ldquo;{imageArea.name}&rdquo;
           </h2>
           <button
             type="button"
@@ -115,15 +126,15 @@ export function ImageTransformDialog({
         <div className="flex flex-col items-center gap-3">
           <canvas
             ref={canvasRef}
-            width={areaW}
-            height={areaH}
+            width={boxW}
+            height={boxH}
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
             className="max-h-[60vh] max-w-full cursor-move touch-none rounded-lg border border-dashed border-zinc-300 bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-800"
           />
           <p className="text-xs text-zinc-500 dark:text-zinc-400">
-            Drag the image to move it — anything outside the box is clipped.
+            Drag the image to move it — the box is the crop boundary.
           </p>
 
           <div className="mt-1 flex w-full items-center gap-4">
@@ -133,7 +144,7 @@ export function ImageTransformDialog({
             <input
               type="range"
               min={0.1}
-              max={3}
+              max={5}
               step={0.01}
               value={transform.scale}
               onChange={(e) =>
@@ -146,7 +157,7 @@ export function ImageTransformDialog({
             </span>
             <button
               type="button"
-              onClick={() => onChange({ offsetX: 0, offsetY: 0, scale: 1 })}
+              onClick={() => onChange({ scale: 1, offsetX: 0, offsetY: 0 })}
               className="rounded-lg border border-zinc-200 px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
             >
               Reset

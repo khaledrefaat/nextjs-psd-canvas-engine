@@ -68,6 +68,7 @@ export function extractEditableLayers(psd: Psd): {
         psdLayer: layer,
         originalCanvas: layer.canvas ? snapshotCanvas(layer.canvas) : null,
         currentImage: null,
+        transform: { scale: 1, offsetX: 0, offsetY: 0 }, // Reset per new file
       });
     }
   });

@@ -2,10 +2,11 @@
 
 import { type Psd, readPsd } from 'ag-psd';
 import { type ChangeEvent, useEffect, useRef, useState } from 'react';
+import { ImageTransformDialog } from '@/components/controls/ImageTransformDialog';
 import { Sidebar } from '@/components/Sidebar';
 import { Icon } from '@/components/ui/Icon';
 import { UploadButton } from '@/components/ui/UploadButton';
-import type { ColorLayer, ImageArea } from '@/types/layer';
+import type { ColorLayer, ImageArea, ImageTransform } from '@/types/layer';
 import { extractEditableLayers } from '@/utils/mockupLayers';
 import { renderMockup } from '@/utils/renderer';
 
@@ -16,6 +17,8 @@ export default function Editor() {
   const [imageAreas, setImageAreas] = useState<ImageArea[]>([]);
   const [psd, setPsd] = useState<Psd | null>(null);
   const [hiddenLayers, setHiddenLayers] = useState<Set<string>>(new Set());
+  // id of the image area whose transform dialog is open (null = closed).
+  const [transformLayerId, setTransformLayerId] = useState<string | null>(null);
 
   // Whenever our layers change, re-render the canvas.
   useEffect(() => {
@@ -92,9 +95,23 @@ export default function Editor() {
     img.src = url;
   };
 
+  // Update an image area's scale/pan from the transform dialog.
+  const handleTransformChange = (
+    layerId: string,
+    transform: ImageTransform,
+  ) => {
+    setImageAreas((prev) =>
+      prev.map((l) => (l.id === layerId ? { ...l, transform } : l)),
+    );
+  };
+
   const layerNames = (psd?.children ?? [])
     .map((child) => child.name ?? 'Layer')
     .filter((name) => !name.includes('mm_'));
+
+  // The image area whose transform dialog is currently open, if any.
+  const transformLayer =
+    imageAreas.find((l) => l.id === transformLayerId) ?? null;
 
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-zinc-100 dark:bg-zinc-950">
@@ -125,6 +142,7 @@ export default function Editor() {
             onToggleLayer={handleToggleLayer}
             onColorChange={handleColorChange}
             onImageUpload={handleImageUpload}
+            onOpenTransform={(id) => setTransformLayerId(id)}
           />
         ) : null}
 
@@ -143,6 +161,16 @@ export default function Editor() {
           )}
         </main>
       </div>
+
+      {transformLayer ? (
+        <ImageTransformDialog
+          imageArea={transformLayer}
+          onChange={(transform) =>
+            handleTransformChange(transformLayer.id, transform)
+          }
+          onClose={() => setTransformLayerId(null)}
+        />
+      ) : null}
     </div>
   );
 }
