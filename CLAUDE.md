@@ -60,9 +60,21 @@ A modal for resizing/panning a placed image. It edits in the **flat source box**
 
 ### Data flow (`src/components/Editor.tsx`)
 
-`Editor` is a `'use client'` component (canvas + PSD parsing are browser-only) and owns all state: `psd`, `colorLayers`, `imageAreas` (the shape of `MockupState` in `src/types/layer.d.ts`), plus `hiddenLayers` (visibility toggles) and `transformLayerId` (which image area's transform dialog is open, null = closed). Each `ImageArea` carries its own `transform` (`{ scale, offsetX, offsetY }`). Every edit is a `setState` call on one of these; a single `useEffect` watches the render-relevant state and calls `renderMockup(canvasRef.current, ...)`, which fully repaints the canvas. There is no incremental redraw — the model is "mutate state → re-render everything."
+`Editor` is a `'use client'` component (canvas + PSD parsing are browser-only) and owns all state: `psd`, `colorLayers`, `imageAreas` (the shape of `MockupState` in `src/types/layer.d.ts`), plus `hiddenLayers` (visibility toggles), `transformLayerId` (which image area's transform dialog is open, null = closed), and `sidebarOpen` (the mobile sidebar drawer — ignored on desktop, where the sidebar is rendered inline). It also accepts an optional `initialExample` prop: when the page is opened from `/examples/[slug]`, the editor fetches and parses that PSD client-side on mount instead of waiting for an upload. Each `ImageArea` carries its own `transform` (`{ scale, offsetX, offsetY }`). Every edit is a `setState` call on one of these; a single `useEffect` watches the render-relevant state and calls `renderMockup(canvasRef.current, ...)`, which fully repaints the canvas. There is no incremental redraw — the model is "mutate state → re-render everything."
 
 The `ag-psd` parse deliberately avoids a merged composite so the individual layer canvases remain available; `psdLayer.canvas` is the object the renderer paints into.
+
+### Built-in example mockups (`src/data/examples.ts`, `src/app/examples/[slug]`)
+
+The app ships starter PSDs in `/public`, registered in `src/data/examples.ts` (`EXAMPLES` array + `getExample(slug)`). Each entry maps a URL-safe `slug` to `{ title, file, img }` (paths under `/public`; spaces in filenames are fine for `fetch`). `/examples/[slug]` is a `generateStaticParams` SSG route: one page is pre-rendered per example at build time, and `generateMetadata` sets a per-example `<title>`. The server only resolves slug → metadata and hands it to `<Editor initialExample={...}>`; the PSD is still fetched + parsed client-side, so this route is a thin shell and canvas/parse stay browser-only exactly as elsewhere. To add a built-in: drop the PSD + a preview PNG in `/public` and append an entry to `EXAMPLES` — `generateStaticParams` picks it up automatically.
+
+### PNG export (`Editor.handleDownload`)
+
+Exports the rendered canvas via `canvas.toBlob(..., 'image/png')` and triggers a download (`mockup.png`). This works only because the canvas never holds cross-origin pixels — the PSD is parsed from an `ArrayBuffer` and user images come from blob URLs, so the canvas is never tainted and `toBlob` always succeeds. If you ever draw remote/cross-origin image data, export silently breaks unless those sources are CORS-enabled and loaded with `crossOrigin`.
+
+### App shell & metadata
+
+Page metadata and favicons are declared through the Next.js **Metadata API** in `src/app/layout.tsx` — `metadata.icons` and `metadata.manifest` generate the `<link>` tags; there is no hand-edited `<head>`. The favicon set lives in `/public` (`favicon.ico`, `favicon-16x16.png`, `favicon-32x32.png`, `apple-touch-icon.png`); the Android/PWA icons (`android-chrome-192x192.png`, `android-chrome-512x512.png`) are referenced from `/public/site.webmanifest`. The example route's own `generateMetadata` overrides `title` per page.
 
 ## Conventions
 

@@ -8,6 +8,9 @@ A browser-based **PSD mockup editor**. Upload a `.psd` file and the layers the d
 - **Swap images** into tagged slots. The replacement is placed at the smart object's original **perspective/angle**, fills the area (cover), and is cropped to its bounds — so it looks like it belongs in the mockup.
 - **Reposition & resize** any placed image in a dedicated dialog: drag to pan, slider to zoom.
 - **Show/hide** individual layers.
+- **Download** the rendered mockup as a PNG.
+- **Responsive** UI — controls collapse into a slide-in drawer on small screens.
+- **Built-in examples** — open a starter mockup without a PSD of your own.
 - Live, non-destructive re-rendering on every edit.
 
 ## Designing a PSD for this editor
@@ -43,6 +46,18 @@ Other scripts:
 - `pnpm start` — serve the production build
 - `pnpm lint` — `biome check`
 - `pnpm format` — `biome format --write`
+
+## Built-in examples
+
+A few starter mockups ship in the repo (3D Business Card, Book Cover, T-Shirt) and are reachable without your own PSD, e.g.:
+
+```
+http://localhost:3000/examples/business-card
+http://localhost:3000/examples/book-cover
+http://localhost:3000/examples/t-shirt
+```
+
+They're listed in the editor's empty state and also linkable directly. Each maps a slug to a PSD + preview image in `src/data/examples.ts`; add your own by dropping files in `/public` and appending an entry.
 
 ## How it works
 
