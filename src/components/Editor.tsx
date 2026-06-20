@@ -105,6 +105,25 @@ export default function Editor() {
     );
   };
 
+  // Export the rendered canvas as a PNG. The canvas only ever holds
+  // locally-sourced pixels (PSD parsed from an ArrayBuffer, user images from
+  // blob URLs), so it isn't cross-origin tainted and toBlob works.
+  const handleDownload = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    canvas.toBlob((blob) => {
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'mockup.png';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }, 'image/png');
+  };
+
   const layerNames = (psd?.children ?? [])
     .map((child) => child.name ?? 'Layer')
     .filter((name) => !name.includes('mm_'));
@@ -128,6 +147,16 @@ export default function Editor() {
           accept=".psd"
           onChange={handleFileUpload}
         />
+        {psd ? (
+          <button
+            type="button"
+            onClick={handleDownload}
+            className="inline-flex items-center gap-2 rounded-lg border border-zinc-300 px-5 py-2.5 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+          >
+            <Icon name="download" className="h-5 w-5" />
+            Download
+          </button>
+        ) : null}
       </header>
 
       {/* Main area: sidebar + canvas */}
