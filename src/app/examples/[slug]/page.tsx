@@ -5,7 +5,7 @@ import { EXAMPLES, getExample } from '@/data/examples';
 
 // Pre-render a page per example at build time.
 export function generateStaticParams() {
-  return EXAMPLES.map((example) => ({ slug: example.slug }));
+  return EXAMPLES.map(example => ({ slug: example.slug }));
 }
 
 // Per-example page titles (nice for tabs / sharing).

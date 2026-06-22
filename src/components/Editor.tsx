@@ -1,8 +1,6 @@
 'use client';
 
 import { type Psd, readPsd } from 'ag-psd';
-import NextImage from 'next/image';
-import Link from 'next/link';
 import {
   type ChangeEvent,
   useCallback,
@@ -10,11 +8,12 @@ import {
   useRef,
   useState,
 } from 'react';
+import { AppHeader } from '@/components/AppHeader';
 import { ImageTransformDialog } from '@/components/controls/ImageTransformDialog';
+import { EmptyState } from '@/components/EmptyState';
 import { Sidebar } from '@/components/Sidebar';
 import { Icon } from '@/components/ui/Icon';
-import { UploadButton } from '@/components/ui/UploadButton';
-import { EXAMPLES, type Example } from '@/data/examples';
+import type { Example } from '@/data/examples';
 import type { ColorLayer, ImageArea, ImageTransform } from '@/types/layer';
 import { extractEditableLayers } from '@/utils/mockupLayers';
 import { renderMockup } from '@/utils/renderer';
@@ -35,7 +34,9 @@ export default function Editor({
   // Mobile sidebar drawer open state (ignored on desktop, where it's inline).
   const [sidebarOpen, setSidebarOpen] = useState(false);
   // Loading state while fetching/parsing an example from /examples/[slug].
-  const [loading, setLoading] = useState(false);
+  // Init true when an example is expected so the first paint shows the spinner
+  // instead of flashing the examples grid before the load effect kicks in.
+  const [loading, setLoading] = useState(() => Boolean(initialExample));
   const [loadError, setLoadError] = useState<string | null>(null);
 
   // Whenever our layers change, re-render the canvas.
@@ -52,8 +53,9 @@ export default function Editor({
   }, [psd, colorLayers, imageAreas, hiddenLayers]);
 
   // Parse a PSD buffer into editable layers and load it into the editor. Shared
-  // by the file picker and the example auto-load below. Memoized so it's stable
-  // enough to be an effect dependency (it only calls stable setState setters).
+  // by the file picker and the example auto-load below. Memoized so it stays
+  // referentially stable as the effect dependency below (it only closes over
+  // stable setState setters).
   const loadPsdBuffer = useCallback((buffer: ArrayBuffer) => {
     const parsedPsd = readPsd(buffer);
     const { colorLayers: nextColors, imageAreas: nextImages } =
@@ -64,13 +66,20 @@ export default function Editor({
     setImageAreas(nextImages);
     // New file → fresh visibility, so stale hidden names don't carry over.
     setHiddenLayers(new Set());
+    // A successful load clears any error from a previous failed attempt.
+    setLoadError(null);
   }, []);
 
   // Load + parse a PSD chosen via the file picker.
   const handleFileUpload = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = ''; // allow re-picking the same file
     if (!file) return;
-    loadPsdBuffer(await file.arrayBuffer());
+    try {
+      loadPsdBuffer(await file.arrayBuffer());
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : 'Failed to load PSD');
+    }
   };
 
   // Auto-load the example passed via the /examples/[slug] route. The PSD is
@@ -126,19 +135,24 @@ export default function Editor({
     });
   };
 
+  // Immutably patch one image area by id, leaving the rest untouched.
+  const patchImageArea = (id: string, patch: Partial<ImageArea>) =>
+    setImageAreas((prev) =>
+      prev.map((l) => (l.id === id ? { ...l, ...patch } : l)),
+    );
+
   const handleImageUpload = (
     layerId: string,
     e: ChangeEvent<HTMLInputElement>,
   ) => {
     const file = e.target.files?.[0];
+    e.target.value = ''; // allow re-picking the same file
     if (!file) return;
 
     const img = new Image();
     const url = URL.createObjectURL(file);
     img.onload = () => {
-      setImageAreas((prev) =>
-        prev.map((l) => (l.id === layerId ? { ...l, currentImage: img } : l)),
-      );
+      patchImageArea(layerId, { currentImage: img });
       // The image is now decoded into `img`, so the blob URL is safe to free.
       URL.revokeObjectURL(url);
     };
@@ -152,9 +166,7 @@ export default function Editor({
     layerId: string,
     transform: ImageTransform,
   ) => {
-    setImageAreas((prev) =>
-      prev.map((l) => (l.id === layerId ? { ...l, transform } : l)),
-    );
+    patchImageArea(layerId, { transform });
   };
 
   // Export the rendered canvas as a PNG. The canvas only ever holds
@@ -186,42 +198,31 @@ export default function Editor({
 
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-zinc-100 dark:bg-zinc-950">
-      {/* Header */}
-      <header className="flex items-center gap-2 sm:gap-4 px-4 sm:px-6 py-3 sm:py-4 border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shrink-0">
-        {psd ? (
+      <AppHeader
+        hasDocument={Boolean(psd)}
+        onUpload={handleFileUpload}
+        onDownload={handleDownload}
+        onOpenSidebar={() => setSidebarOpen(true)}
+      />
+
+      {/* Surface load errors (bad upload, failed example fetch) regardless of
+          whether a document is already open. Auto-clears on the next load. */}
+      {loadError ? (
+        <div
+          role="alert"
+          className="flex shrink-0 items-center gap-3 border-b border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300"
+        >
+          <span className="flex-1">{loadError}</span>
           <button
             type="button"
-            aria-label="Show adjustments"
-            onClick={() => setSidebarOpen(true)}
-            className="inline-flex shrink-0 items-center justify-center rounded-lg p-2 text-zinc-700 hover:bg-zinc-100 md:hidden dark:text-zinc-300 dark:hover:bg-zinc-800"
+            aria-label="Dismiss error"
+            onClick={() => setLoadError(null)}
+            className="rounded p-1 hover:bg-red-100 dark:hover:bg-red-900"
           >
-            <Icon name="menu" className="h-5 w-5" />
+            <Icon name="close" className="h-4 w-4" />
           </button>
-        ) : null}
-        <h1 className="hidden sm:block text-xl font-semibold text-zinc-900 dark:text-zinc-100">
-          <Link href="/" className="hover:opacity-80">
-            PSD Mockup Editor
-          </Link>
-        </h1>
-        <UploadButton
-          className="ml-auto"
-          variant="solid"
-          icon="upload"
-          label="Upload PSD"
-          accept=".psd"
-          onChange={handleFileUpload}
-        />
-        {psd ? (
-          <button
-            type="button"
-            onClick={handleDownload}
-            className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-zinc-300 px-4 py-2.5 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-50 sm:px-5 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-          >
-            <Icon name="download" className="h-5 w-5" />
-            <span className="hidden sm:inline">Download</span>
-          </button>
-        ) : null}
-      </header>
+        </div>
+      ) : null}
 
       {/* Main area: sidebar + canvas */}
       <div className="flex flex-1 min-h-0">
@@ -256,51 +257,7 @@ export default function Editor({
         {/* Canvas area */}
         <main className="flex-1 flex items-center justify-center p-4 overflow-auto md:p-8">
           {!psd ? (
-            loading ? (
-              <div className="flex flex-col items-center gap-3 text-zinc-400 dark:text-zinc-600">
-                <Icon
-                  name="image"
-                  className="h-12 w-12 animate-pulse"
-                  strokeWidth={1.5}
-                />
-                <p className="text-sm">Loading example…</p>
-              </div>
-            ) : (
-              <div className="flex w-full max-w-3xl flex-col items-center gap-8">
-                <div className="flex flex-col items-center gap-3 text-center text-zinc-400 dark:text-zinc-600">
-                  <Icon name="image" className="h-20 w-20" strokeWidth={1} />
-                  <p className="text-lg">Upload a PSD or try an example</p>
-                </div>
-                {loadError ? (
-                  <p className="text-sm text-red-500 dark:text-red-400">
-                    {loadError}
-                  </p>
-                ) : null}
-                <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-3">
-                  {EXAMPLES.map((example) => (
-                    <Link
-                      key={example.slug}
-                      href={`/examples/${example.slug}`}
-                      className="group flex flex-col gap-3 rounded-xl border border-zinc-200 bg-white p-4 transition-colors hover:border-zinc-400 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-zinc-600 dark:hover:bg-zinc-800"
-                    >
-                      <div className="relative aspect-square overflow-hidden rounded-lg bg-zinc-100 dark:bg-zinc-800">
-                        <NextImage
-                          src={example.img}
-                          alt={example.title}
-                          fill
-                          loading="eager"
-                          sizes="(max-width: 640px) 90vw, 30vw"
-                          className="object-cover transition-transform duration-200 group-hover:scale-105"
-                        />
-                      </div>
-                      <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                        {example.title}
-                      </span>
-                    </Link>
-                  ))}
-                </div>
-              </div>
-            )
+            <EmptyState loading={loading} />
           ) : (
             <canvas
               ref={canvasRef}
