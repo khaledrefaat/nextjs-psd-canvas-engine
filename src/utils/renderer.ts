@@ -29,6 +29,10 @@ function applyColorLayer(cl: ColorLayer) {
   }
 
   // Composite the color on a temp canvas, masking against the pristine shape.
+  // Draw the original (the alpha mask), then fill the color with `source-in` so
+  // the color lands ONLY where the shape exists — anything outside the shape
+  // stays transparent. (Filling with source-over first would overwrite the mask
+  // with a solid rectangle and the later source-in couldn't recover it.)
   const tempCanvas = document.createElement('canvas');
   tempCanvas.width = width;
   tempCanvas.height = height;
@@ -36,9 +40,8 @@ function applyColorLayer(cl: ColorLayer) {
   if (!tempCtx) return;
 
   tempCtx.drawImage(original, 0, 0);
-  tempCtx.fillStyle = color;
-  tempCtx.fillRect(0, 0, width, height);
   tempCtx.globalCompositeOperation = 'source-in';
+  tempCtx.fillStyle = color;
   tempCtx.fillRect(0, 0, width, height);
   tempCtx.globalCompositeOperation = 'source-over';
 
